@@ -1,0 +1,188 @@
+from sklearn.metrics import pairwise_distances
+from sklearn.metrics import pairwise_distances_argmin_min
+import pandas as pd
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+
+data = pd.read_excel("DataClean.xlsm", sheet_name = "Customer_Master")
+coordinates = data[['Latitude', 'Longitude']]
+customer_coords = pd.DataFrame(coordinates)
+
+
+def calculate_distances(customer_coords, dcs_coords, plants_coords):
+    # tinh khoang cach tu custumer den dc
+    distances_to_dcs = pairwise_distances(customer_coords, dcs_coords)
+    
+    # tinh khoang cach tu custumer toi plants
+    distances_to_plants = pairwise_distances(customer_coords, plants_coords)
+    
+    return distances_to_dcs,  distances_to_plants
+
+dcs_coords = [[-37.781694, 144.751154], [-37.7982317, 144.7468676], [-37.7982317,144.7468676], [-37.840767,144.837577]]  # [latitude, longitude]
+plants_coords = [[-38.3273997, 143.064535], [-38.327407, 143.064488]]  # [latitude, longitude]
+
+# tinh khoang cach
+distances_to_dcs, distances_to_plants = calculate_distances(
+    customer_coords, dcs_coords, plants_coords
+)
+
+df1 = pd.DataFrame(distances_to_dcs)
+df1.columns = ['DC1', 'DC2', 'DC3', 'DC4']
+df1.insert(0, 'id', range(1, 1 + len(df1)))
+df2 = pd.DataFrame(distances_to_plants)
+df2.columns = ['PL1', 'PL2']
+df2.insert(0, 'id', range(1, 1 + len(df2)))
+# print(df1)
+# print(df2)
+df3 = pd.merge(df1, df2, on="id")
+# print(df3)
+
+min_distance_dcs = pairwise_distances_argmin_min(customer_coords, dcs_coords)
+df4 = pd.DataFrame(min_distance_dcs[1])
+df4.columns = ['min_DC']
+df4.insert(0, 'id', range(1, 1 + len(df4)))
+# print(df4)
+
+min_distance_plants = pairwise_distances_argmin_min(customer_coords, plants_coords)
+df5 = pd.DataFrame(min_distance_plants[1])
+df5.columns = ['min_PL']
+df5.insert(0, 'id', range(1, 1 + len(df5)))
+
+df6 = pd.merge(df3, df4, on="id")
+df7 = pd.merge(df6, df5, on="id")
+print(df7)
+
+customers_data = data[['CustomerRef', 'Latitude', 'Longitude']]
+customers_data.insert(0, 'id', range(1, 1 + len(customers_data)))
+print(customers_data)
+
+df = pd.merge(customers_data, df7, on="id")
+print(df)
+
+data1 = pd.read_excel("Sales_Order.xlsx")
+data_needed = data1[['CustomerRef', 'NumOfPallets', 'TypeOfPackingMaterial']]
+print(data_needed)
+print(df['CustomerRef'].nunique())
+
+customer_orders = data_needed.groupby("TypeOfPackingMaterial") 
+dc_orders = [customer_orders.get_group(1) for x in customer_orders.groups]
+# print(dc_orders)
+dc_orders = pd.DataFrame(dc_orders[0])
+# print(dc_orders)
+dc_orders = dc_orders.groupby('CustomerRef')['NumOfPallets'].sum()
+dc_orders = pd.DataFrame(dc_orders)
+# dc_orders.columns = ['CNT_PBOT_USAGE']
+# print(dc_orders)
+df_total1 = pd.merge(df, dc_orders, on="CustomerRef", how='outer')
+print(df_total1)
+
+plant_orders = [customer_orders.get_group(2) for x in customer_orders.groups]
+plant_orders = pd.DataFrame(plant_orders[0])
+# print(plant_orders)
+plant_orders = plant_orders.groupby('CustomerRef')['NumOfPallets'].sum()
+plant_orders = pd.DataFrame(plant_orders)
+print(plant_orders)
+# plant_orders.columns = ['CNT_PBOT_USAGE']
+# print(plant_orders)
+df_total2 = pd.merge(df_total1, plant_orders, on="CustomerRef", how='outer')
+df_total = df_total2.fillna(0)
+print(df_total)
+
+data_final = df_total[['Latitude', 'Longitude', 'DC1', 'DC2', 'DC3', 'DC4', 'PL1', 'PL2', 'min_DC', 'min_PL', 'NumOfPallets_x', 'NumOfPallets_y']]
+print(data_final)
+
+from sklearn import preprocessing
+import numpy as np
+
+X_train = np.array(data_final)
+# print(X_train)
+scaler = preprocessing.StandardScaler().fit(X_train)
+data_scaled = scaler.transform(X_train)
+print(data_scaled)
+
+inertia = []
+k_values = range(1, 50)
+
+for k in k_values:
+    kmeans = KMeans(n_clusters=k)
+    kmeans.fit(data_scaled)
+    inertia.append(kmeans.inertia_)
+
+plt.plot(k_values, inertia, 'bx-')
+plt.xlabel('Number of clusters (n_clusters)')
+plt.ylabel('Inertia')
+plt.title('Elbow Method')
+plt.show()
+
+kmeans = KMeans(n_clusters=5)
+kmeans.fit(data_scaled)
+
+# Lấy nhãn của các mẫu
+labels = kmeans.labels_
+
+# Thêm nhãn vào DataFrame gốc
+data['Cluster'] = labels
+data_final['Cluster'] = labels
+# In ra kết quả phân loại khu vực
+print(data[['Longitude', 'Latitude', 'Cluster']])
+
+# Lấy các điểm trọng tâm của từng cluster
+cluster_centers = scaler.inverse_transform(kmeans.cluster_centers_)
+
+# In ra các điểm trọng tâm
+for i in range(5):
+    print(f"Cluster {i+1} center: Latitude = {cluster_centers[i][0]}, Longtitude = {cluster_centers[i][1]}")
+
+inertia = kmeans.inertia_
+
+print(f"Loss: {inertia}")
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+# Biểu diễn scatter plot
+sns.scatterplot(data=data[['Longitude', 'Latitude', 'Cluster']], x='Longitude', y='Latitude', hue='Cluster', palette='Set1')
+
+# Đặt nhãn và tiêu đề cho biểu đồ
+plt.xlabel('Longitude')
+plt.ylabel('Latitude')
+plt.title('K-means Clustering')
+
+# Hiển thị biểu đồ
+plt.show()
+
+final_task = data_final[['Longitude', 'Latitude', 'NumOfPallets_x', 'NumOfPallets_y', 'Cluster']]
+total_pallets = data_final["NumOfPallets_x"] + data_final["NumOfPallets_y"]
+final_task["total_pallets"]=total_pallets
+final_task.to_excel("final_output.xlsx")
+# print(final_task)
+customer_pallets_usage = final_task.groupby("Cluster") 
+pallets_usage_cluster_0 = customer_pallets_usage.get_group(0)
+pallets_usage_cluster_0 = pd.DataFrame(pallets_usage_cluster_0)
+# print(pallets_usage_cluster_0)
+pallets_usage_cluster_0 = pallets_usage_cluster_0['total_pallets'].sum()
+print("Pallet usage per day of cluster 1", pallets_usage_cluster_0/512)
+
+pallets_usage_cluster_1 = customer_pallets_usage.get_group(1)
+pallets_usage_cluster_1 = pd.DataFrame(pallets_usage_cluster_1)
+# print(pallets_usage_cluster_1)
+pallets_usage_cluster_1 = pallets_usage_cluster_1['total_pallets'].sum()
+print("Pallet usage per day of cluster 2", pallets_usage_cluster_1/512)
+
+pallets_usage_cluster_2 = customer_pallets_usage.get_group(2)
+pallets_usage_cluster_2 = pd.DataFrame(pallets_usage_cluster_2)
+# print(pallets_usage_cluster_2)
+pallets_usage_cluster_2 = pallets_usage_cluster_2['total_pallets'].sum()
+print("Pallet usage per day of cluster 3", pallets_usage_cluster_2/512)
+
+pallets_usage_cluster_3 = customer_pallets_usage.get_group(3)
+pallets_usage_cluster_3 = pd.DataFrame(pallets_usage_cluster_3)
+# print(pallets_usage_cluster_3)
+pallets_usage_cluster_3 = pallets_usage_cluster_3['total_pallets'].sum()
+print("Pallet usage per day of cluster 4", pallets_usage_cluster_3/512)
+
+pallets_usage_cluster_4 = customer_pallets_usage.get_group(4)
+pallets_usage_cluster_4 = pd.DataFrame(pallets_usage_cluster_4)
+# print(pallets_usage_cluster_4)
+pallets_usage_cluster_4 = pallets_usage_cluster_4['total_pallets'].sum()
+print("Pallet usage per day of cluster 5", pallets_usage_cluster_4/512)
